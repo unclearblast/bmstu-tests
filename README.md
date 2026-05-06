@@ -53,7 +53,7 @@
 ### Схема взаимодействия
 ```mermaid
 graph TD
-    Client[Клиент (студент/преподаватель)]
+    Client[Клиент]
     Gateway[API Gateway :8000]
     Storage[File Storage Service]
     Analysis[File Analysis Service]
