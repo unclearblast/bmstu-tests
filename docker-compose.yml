@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: cosmoscan
+      POSTGRES_PASSWORD: cosmoscan_pass
+      POSTGRES_DB: cosmoscan
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cosmoscan"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - cosmoscan-net
+
+  file-storage:
+    build: ./file_storage
+    environment:
+      DATABASE_URL: postgresql://cosmoscan:cosmoscan_pass@postgres/cosmoscan
+      UPLOAD_DIR: /uploads
+    volumes:
+      - uploads_data:/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - cosmoscan-net
+
+  file-analysis:
+    build: ./file_analysis
+    environment:
+      DATABASE_URL: postgresql://cosmoscan:cosmoscan_pass@postgres/cosmoscan
+      FILE_STORAGE_URL: http://file-storage:8000
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - cosmoscan-net
+
+  gateway:
+    build: ./gateway
+    ports:
+      - "8000:8000"
+    environment:
+      FILE_STORAGE_URL: http://file-storage:8000
+      ANALYSIS_URL: http://file-analysis:8000
+    depends_on:
+      - file-storage
+      - file-analysis
+    networks:
+      - cosmoscan-net
+
+volumes:
+  uploads_data:
+
+networks:
+  cosmoscan-net:
+    driver: bridge
