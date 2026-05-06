@@ -69,7 +69,7 @@ graph TD
     Gateway -->|GET /works/{id}/reports| Analysis
     Client -->|GET /works/{id}/wordcloud| Gateway
     Gateway -->|GET /works/{id}/wordcloud| Analysis
-    Analysis -->|GET /files/{work_id}| Storage
+    Analysis -->|GET /files/work_i}| Storage
 text
 
 Часть 2 – Сценарии, структура проекта, модели БД
