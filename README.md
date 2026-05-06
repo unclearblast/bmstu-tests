@@ -63,13 +63,13 @@ graph TD
     Gateway -->|POST /files| Storage
     Storage --> DB
     Gateway -->|POST /analyze| Analysis
-    Analysis -->|GET /files/{work_id}| Storage
+    Analysis -->|GET /files/workid| Storage
     Analysis --> DB
-    Client -->|GET /works/{id}/reports| Gateway
-    Gateway -->|GET /works/{id}/reports| Analysis
-    Client -->|GET /works/{id}/wordcloud| Gateway
-    Gateway -->|GET /works/{id}/wordcloud| Analysis
-    Analysis -->|GET /files/work_i}| Storage
+    Client -->|GET /works/id/reports| Gateway
+    Gateway -->|GET /works/i/reports| Analysis
+    Client -->|GET /works/id/wordcloud| Gateway
+    Gateway -->|GET /works/id/wordcloud| Analysis
+    Analysis -->|GET /files/work| Storage
 text
 
 Часть 2 – Сценарии, структура проекта, модели БД
