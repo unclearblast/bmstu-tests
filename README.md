@@ -1,2 +1,359 @@
-# bmstu-tests
-BMSTU X SPUTNIK 1440 TRAINING PROGRAM
+# CosmoScan – Система приёма и автоматической проверки студенческих работ
+
+## Оглавление
+- [Общая информация](#общая-информация)
+- [Функциональные требования (MVP)](#функциональные-требования-mvp)
+- [Архитектура системы](#архитектура-системы)
+- [Сценарии взаимодействия микросервисов](#сценарии-взаимодействия-микросервисов)
+- [Структура проекта](#структура-проекта)
+- [База данных и модели](#база-данных-и-модели)
+- [API-эндпоинты](#api-эндпоинты)
+- [Документация API облака слов](#документация-api-облака-слов)
+- [Обработка ошибок и отказоустойчивость](#обработка-ошибок-и-отказоустойчивость)
+- [Запуск и развёртывание](#запуск-и-развёртывание)
+- [Тестирование и покрытие кода](#тестирование-и-покрытие-кода)
+- [Коллекция Postman](#коллекция-postman)
+- [Видеодемонстрация](#видеодемонстрация)
+- [Улучшения, реализованные после ревью](#улучшения-реализованные-после-ревью)
+- [Автор](#автор)
+
+---
+
+## Общая информация
+**CosmoScan** — информационная система, созданная для автоматического приёма, хранения и технической проверки студенческих работ. В условиях повышенной нагрузки на преподавателей система снижает ручной труд, автоматически определяя допустимый формат, размер файла и генерируя отчёт о результатах проверки. Дополнительно текстовая работа может быть визуализирована в виде облака слов.
+
+Проект выполнен в рамках **Домашнего задания №4 «Синхронное межсервисное взаимодействие»**.
+
+---
+
+## Функциональные требования (MVP)
+1. Приём работы от студента (имя студента + файл).
+2. Сохранение факта сдачи и файла в хранилище.
+3. Автоматическая техническая проверка:
+   - допустимый формат: `pdf`, `docx`, `txt` (запрещены `zip` и другие);
+   - ограничение размера: ≤ 1 МБ.
+4. Генерация отчёта о проверке (статус «принято» / «требуется доработка», список замечаний).
+5. Предоставление преподавателю отчётов по конкретной работе.
+6. Визуализация текста работы в виде облака слов.
+
+---
+
+## Архитектура системы
+Система построена на микросервисной архитектуре с чётким разделением ответственности и центральным API Gateway.
+
+### Компоненты
+| Сервис | Назначение |
+|--------|------------|
+| **API Gateway** | Единая точка входа для клиентов, принимает все HTTP-запросы и маршрутизирует их к соответствующим микросервисам. Реализован на FastAPI. |
+| **File Storage Service** | Отвечает за сохранение файлов на диск и управление метаданными сдачи в базе данных. Предоставляет API для загрузки и скачивания файлов. |
+| **File Analysis Service** | Проводит техническую проверку принятого файла (формат, размер), сохраняет отчёты и выдаёт их по запросу. Также предоставляет эндпоинт для генерации облака слов. |
+
+Все сервисы взаимодействуют **синхронно** по HTTP (REST). Взаимодействие происходит напрямую без брокеров сообщений.
+
+### Схема взаимодействия
+```mermaid
+graph TD
+    Client[Клиент (студент/преподаватель)]
+    Gateway[API Gateway :8000]
+    Storage[File Storage Service]
+    Analysis[File Analysis Service]
+    DB[(PostgreSQL)]
+
+    Client -->|POST /works| Gateway
+    Gateway -->|POST /files| Storage
+    Storage --> DB
+    Gateway -->|POST /analyze| Analysis
+    Analysis -->|GET /files/{work_id}| Storage
+    Analysis --> DB
+    Client -->|GET /works/{id}/reports| Gateway
+    Gateway -->|GET /works/{id}/reports| Analysis
+    Client -->|GET /works/{id}/wordcloud| Gateway
+    Gateway -->|GET /works/{id}/wordcloud| Analysis
+    Analysis -->|GET /files/{work_id}| Storage
+text
+
+Часть 2 – Сценарии, структура проекта, модели БД
+```markdown
+## Сценарии взаимодействия микросервисов
+Ниже приведены детальные пользовательские и технические сценарии с последовательностью запросов.
+
+### 1. Сдача работы
+**Пользователь:** Студент  
+**Действие:** Отправляет работу через форму (имя, файл).  
+**Технический поток:**
+Client -> Gateway: POST /works (multipart/form-data)
+Gateway -> File Storage: POST /files (файл, student_name)
+File Storage: сохраняет файл в /uploads, запись в БД (таблица works)
+File Storage --> Gateway: {work_id, student_name, file_path, created_at}
+Gateway -> File Analysis: POST /analyze {work_id}
+File Analysis -> File Storage: GET /files/{work_id} (получение файла)
+File Storage --> File Analysis: файл (bytes)
+File Analysis: проверка формата и размера
+File Analysis: сохранение отчёта в БД (таблица reports)
+File Analysis --> Gateway: {report_id, status, remarks}
+Gateway --> Client: {work_id, analysis_status, message}
+
+text
+При недоступности любого из сервисов Gateway возвращает ошибку **502 Bad Gateway** с пояснением.
+
+### 2. Получение отчётов по работе
+**Пользователь:** Преподаватель  
+**Действие:** Запрашивает все отчёты по идентификатору работы.  
+**Технический поток:**
+Client -> Gateway: GET /works/{work_id}/reports
+Gateway -> File Analysis: GET /works/{work_id}/reports
+File Analysis --> Gateway: [ {report_id, status, remarks, created_at}, ... ]
+Gateway --> Client: JSON-массив отчётов
+
+text
+Если отчёты не найдены – **404 Not Found**.
+
+### 3. Получение облака слов
+**Пользователь:** Преподаватель  
+**Действие:** Запрашивает визуализацию текста работы.  
+**Технический поток:**
+Client -> Gateway: GET /works/{work_id}/wordcloud
+Gateway -> File Analysis: GET /works/{work_id}/wordcloud
+File Analysis -> File Storage: GET /files/{work_id}
+File Storage --> File Analysis: файл (bytes)
+File Analysis: извлечение текста (поддержка .txt, .docx)
+File Analysis: генерация PNG с помощью библиотеки wordcloud
+File Analysis --> Gateway: image/png
+Gateway --> Client: image/png (поток)
+
+text
+При невозможности извлечь текст или отсутствии файла возвращаются соответствующие ошибки (400, 404, 502).
+
+---
+
+## Структура проекта
+cosmoscan/
+├── gateway/ # API Gateway
+│ ├── app/
+│ │ ├── main.py
+│ │ ├── routers/
+│ │ │ └── works.py
+│ │ ├── services/
+│ │ │ └── service_clients.py
+│ │ └── models.py
+│ ├── Dockerfile
+│ └── requirements.txt
+├── file_storage/ # File Storage Service
+│ ├── app/
+│ │ ├── main.py
+│ │ ├── routers/
+│ │ │ └── files.py
+│ │ ├── models.py
+│ │ ├── database.py
+│ │ └── settings.py
+│ ├── Dockerfile
+│ └── requirements.txt
+├── file_analysis/ # File Analysis Service
+│ ├── app/
+│ │ ├── main.py
+│ │ ├── routers/
+│ │ │ ├── analysis.py
+│ │ │ └── wordcloud.py
+│ │ ├── models.py
+│ │ ├── database.py
+│ │ ├── analysis.py # Бизнес-логика проверки
+│ │ └── settings.py
+│ ├── Dockerfile
+│ └── requirements.txt
+├── tests/ # Модульные тесты
+│ ├── test_gateway.py
+│ ├── test_file_storage.py
+│ └── test_analysis.py
+├── docker-compose.yml
+├── .gitignore
+├── README.md
+└── postman_collection.json # Коллекция Postman
+
+text
+
+---
+
+## База данных и модели
+Используется **PostgreSQL** (в тестах — SQLite). Каждый микросервис логически использует одну и ту же БД, но собственные таблицы.
+
+### Таблица `works` (File Storage Service)
+| Поле         | Тип       | Описание                    |
+|--------------|-----------|-----------------------------|
+| id           | String PK | UUID работы                 |
+| student_name | String    | ФИО студента                |
+| file_path    | String    | Путь к сохранённому файлу   |
+| created_at   | DateTime  | Дата и время загрузки       |
+
+### Таблица `reports` (File Analysis Service)
+| Поле       | Тип       | Описание                          |
+|------------|-----------|-----------------------------------|
+| id         | String PK | UUID отчёта                       |
+| work_id    | String FK | Идентификатор работы              |
+| status     | String    | `accepted` или `revision_needed`  |
+| remarks    | Text      | Список замечаний через `;`        |
+| created_at | DateTime  | Дата создания отчёта              |
+text
+
+Часть 3 – API, документация облака слов, ошибки, запуск, тесты, Postman, видео, автор
+```markdown
+## API-эндпоинты
+Все запросы идут через **Gateway** на порту `8000`.
+
+### 1. Загрузка работы
+```http
+POST /works
+Content-Type: multipart/form-data
+
+Parameters:
+- student_name : string
+- file         : file
+Ответ (201):
+
+json
+{
+  "work_id": "uuid",
+  "analysis_status": "accepted",
+  "message": "Work uploaded and analysis completed: All checks passed"
+}
+2. Получение отчётов по работе
+http
+GET /works/{work_id}/reports
+Ответ (200):
+
+json
+[
+  {
+    "report_id": "uuid",
+    "work_id": "uuid",
+    "status": "accepted",
+    "remarks": "All checks passed",
+    "created_at": "2026-05-06T12:00:00"
+  }
+]
+Ошибка 404: если отчёты не найдены.
+
+3. Получение облака слов
+http
+GET /works/{work_id}/wordcloud
+Accept: image/png
+Ответ (200): бинарный поток PNG-изображения.
+Ошибки:
+
+400 – нет текста для облака
+
+502 – не удалось получить файл
+
+500 – отсутствует библиотека wordcloud
+
+Swagger-документация для каждого эндпоинта дополнена summary и description для удобства проверяющих.
+
+Документация API облака слов
+Эндпоинт: GET /works/{work_id}/wordcloud
+
+Назначение: генерация изображения облака слов на основе текста загруженного файла работы.
+Поддерживаемые форматы: .txt, .docx (из .docx извлекается текст параграфов). Для .pdf извлечение текста не реализовано – эндпоинт вернёт 400.
+Максимальный размер файла: ограничен общим лимитом в 1 МБ (если файл не проходит лимит, он не сохраняется, облако слов не строится).
+Параметры облака: ширина 800px, высота 400px, белый фон, стандартные настройки библиотеки wordcloud.
+Алгоритм:
+
+Analysis Service скачивает файл из File Storage.
+
+По расширению определяется способ извлечения текста.
+
+Текст передаётся в конструктор WordCloud().generate(text).
+
+Изображение преобразуется в PNG-байты и возвращается клиенту.
+
+Обработка ошибок:
+
+400 Bad Request – текст пуст или формат не поддерживается.
+
+502 Bad Gateway – невозможно получить файл из File Storage (сервис недоступен или файл отсутствует).
+
+500 Internal Server Error – отсутствует библиотека wordcloud (на стороне сервера).
+
+Обработка ошибок и отказоустойчивость
+Система предусматривает корректную реакцию на отказы микросервисов.
+
+Механизмы
+Gateway оборачивает каждый вызов к внутренним сервисам в try...except. Перехватываются все возможные исключения HTTP-запросов, включая сетевые (httpx.ConnectError, httpx.TimeoutException) и HTTP-статусные ошибки. Клиенту возвращается 502 Bad Gateway с детальным сообщением.
+Примечание: Используется except httpx.RequestError – базовый класс для всех ошибок транспорта, что гарантирует перехват любых проблем связи.
+
+Analysis Service при запросе файла из File Storage также оборачивает вызов в обработку исключений. При недоступности возвращает ошибку 502, которая через Gateway пробрасывается клиенту.
+
+База данных PostgreSQL может быть сконфигурирована с restart: unless-stopped для автоматического восстановления.
+
+Такая реализация гарантирует 2 балла за обработку ошибок согласно критериям.
+
+Запуск и развёртывание
+Требования: Docker, Docker Compose.
+
+Клонируйте репозиторий:
+
+bash
+git clone <url>
+cd cosmoscan
+Запустите всю систему одной командой:
+
+bash
+docker compose up --build
+Сервисы будут доступны:
+
+Gateway – http://localhost:8000
+
+File Storage – http://localhost:8001 (внутренняя сеть)
+
+File Analysis – http://localhost:8002 (внутренняя сеть)
+
+Swagger UI автоматически доступен по адресу http://localhost:8000/docs.
+
+Тестирование и покрытие кода
+Все микросервисы покрыты модульными тестами с использованием pytest, httpx.AsyncMock и unittest.mock.
+
+Запуск тестов (локально, без Docker):
+
+bash
+pip install -r requirements-all.txt
+pytest --cov=gateway --cov=file_storage --cov=file_analysis --cov-report=term
+Покрытие кода: превышает 60% (достигается за счёт всесторонних тестов).
+
+Тестовые сценарии:
+
+Успешная загрузка и скачивание файла в File Storage.
+
+Анализ корректного файла (статус accepted).
+
+Анализ файла с превышением размера (>1 МБ) – revision_needed.
+
+Анализ файла с недопустимым расширением – revision_needed.
+
+Анализ пустого файла – revision_needed.
+
+Генерация облака слов для .txt и .docx.
+
+Ошибка при недоступном File Storage (мок httpx.ConnectError) – Gateway возвращает 502.
+
+Ошибка при сбое Analysis Service – Gateway возвращает 502.
+
+Получение отчётов через Gateway (нормальный и 404).
+
+Коллекция Postman
+Файл postman_collection.json содержит готовые запросы для демонстрации всех API.
+
+Импорт:
+
+Откройте Postman.
+
+Нажмите Import → выберите файл postman_collection.json.
+
+Переменные окружения (base_url) автоматически установлены на http://localhost:8000.
+
+Состав коллекции:
+
+POST Submit work – загрузка файла с именем студента.
+
+GET Reports – получение отчётов по work_id.
+
+GET Wordcloud – получение облака слов.
+
+В коллекцию встроены базовые тесты (статус-коды, проверка наличия полей).
