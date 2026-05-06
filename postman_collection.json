@@ -1,0 +1,144 @@
+{
+	"info": {
+		"_postman_id": "cosmoscan-collection",
+		"name": "CosmoScan API",
+		"description": "Коллекция запросов для демонстрации всех API системы CosmoScan. Включает автоматическую установку переменных после создания работы.",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8000",
+			"type": "string"
+		},
+		{
+			"key": "work_id",
+			"value": "",
+			"type": "string"
+		}
+	],
+	"item": [
+		{
+			"name": "Submit work",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test(\"Status code is 200\", function () {",
+							"    pm.response.to.have.status(200);",
+							"});",
+							"",
+							"var jsonData = pm.response.json();",
+							"pm.test(\"Work ID exists\", function () {",
+							"    pm.expect(jsonData.work_id).to.be.a('string');",
+							"});",
+							"",
+							"pm.collectionVariables.set(\"work_id\", jsonData.work_id);",
+							"",
+							"pm.test(\"Analysis status is present\", function () {",
+							"    pm.expect(jsonData.analysis_status).to.be.oneOf(['accepted', 'revision_needed']);",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "formdata",
+					"formdata": [
+						{
+							"key": "student_name",
+							"value": "Иван Петров",
+							"type": "text"
+						},
+						{
+							"key": "file",
+							"type": "file",
+							"src": "test.txt"
+						}
+					]
+				},
+				"url": {
+					"raw": "{{base_url}}/works",
+					"host": ["{{base_url}}"],
+					"path": ["works"]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Get reports",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test(\"Status code is 200\", function () {",
+							"    pm.response.to.have.status(200);",
+							"});",
+							"",
+							"var jsonData = pm.response.json();",
+							"pm.test(\"Response is an array\", function () {",
+							"    pm.expect(jsonData).to.be.an('array');",
+							"});",
+							"",
+							"if (jsonData.length > 0) {",
+							"    pm.test(\"Report has required fields\", function () {",
+							"        pm.expect(jsonData[0]).to.have.property('report_id');",
+							"        pm.expect(jsonData[0]).to.have.property('status');",
+							"        pm.expect(jsonData[0]).to.have.property('remarks');",
+							"    });",
+							"}"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/works/{{work_id}}/reports",
+					"host": ["{{base_url}}"],
+					"path": ["works", "{{work_id}}", "reports"]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Get word cloud",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test(\"Status code is 200\", function () {",
+							"    pm.response.to.have.status(200);",
+							"});",
+							"",
+							"pm.test(\"Content-Type is image/png\", function () {",
+							"    var contentType = pm.response.headers.get('content-type');",
+							"    pm.expect(contentType).to.include('image/png');",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/works/{{work_id}}/wordcloud",
+					"host": ["{{base_url}}"],
+					"path": ["works", "{{work_id}}", "wordcloud"]
+				}
+			},
+			"response": []
+		}
+	]
+}
