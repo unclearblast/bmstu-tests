@@ -50,29 +50,6 @@
 
 Все сервисы взаимодействуют **синхронно** по HTTP (REST). Взаимодействие происходит напрямую без брокеров сообщений.
 
-### Схема взаимодействия
-```mermaid
-graph TD
-    Client[Клиент]
-    Gateway[API Gateway :8000]
-    Storage[File Storage Service]
-    Analysis[File Analysis Service]
-    DB[(PostgreSQL)]
-
-    Client -->|POST /works| Gateway
-    Gateway -->|POST /files| Storage
-    Storage --> DB
-    Gateway -->|POST /analyze| Analysis
-    Analysis -->|GET /files/workid| Storage
-    Analysis --> DB
-    Client -->|GET /works/id/reports| Gateway
-    Gateway -->|GET /works/i/reports| Analysis
-    Client -->|GET /works/id/wordcloud| Gateway
-    Gateway -->|GET /works/id/wordcloud| Analysis
-    Analysis -->|GET /files/work| Storage
-text
-
-
 ## Сценарии взаимодействия микросервисов
 Ниже приведены детальные пользовательские и технические сценарии с последовательностью запросов.
 
